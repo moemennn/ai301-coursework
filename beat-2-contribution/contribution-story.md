@@ -58,11 +58,9 @@ one in the week it belongs to.
 
 I wrote a search strategy for issue-scout: 14 `gh search issues` queries, each traced to a sentence of my fit profile, plus point-based ranking filters that send the top 5 to my rubric for grading. Scan 1 showed two problems. My rubric accepted 4 issues whose fix was already merged, because Actionable only read the issue text. It also counted bot-only commits as repo activity. On the strategy side, one org filling slots across sibling repos and a 1,456-comment bounty issue took up all 5 grading slots. I added an "already done on main" fail condition to Actionable, excluded bot-only commits from Active, and changed the strategy to cap per owner, ignore blanket labels, and drop bounty and crowded issues. Scan 2 showed the fixes working: 5 different owners, and the new Actionable condition caught 2 already-fixed issues.
 
-**Unit 6: [one line on the tool work]**
+**Unit 6: installed the voice guard, patched my rubric's scope check, and wrote a repo memory file for opengris-scaler (2026-11-18)**
 
-[2-4 sentences: the voice-guard, the repo-memory file. What broke or
-fell short, and what changed because of it. "Nothing broke" counts when
-it is true - say how you know.]
+I merged my three voice-guide copies into one guide with an Upstream section for claims, questions, and pings, and hooked the guard into Claude Code, where the wiring test stopped `gh issue comment --help` as it should. Its first real check came 20 minutes after I had already posted my claim, and it stopped on my own claims rule: "I'm aiming to open a PR within about a week" promises a PR before the maintainers have chosen a design. The revised line passed, but the posted comment still has the original, so I now post through Claude Code with `--body-file`, where the hook checks a draft before it goes up. My `CLAUDE.local.md` for opengris-scaler distills CONTRIBUTING.md and one orientation pass over the object storage code, and writing it caught two things I'd have gotten wrong: a stale version-bump path that recent PRs skip (I'll ask about it in my PR), and an AGENTS.md ban on agent `Co-authored-by` trailers, which the file now tells Claude to follow.
 
 **Unit 7: [one line on the tool work]**
 
