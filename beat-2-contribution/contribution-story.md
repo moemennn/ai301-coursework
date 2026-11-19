@@ -122,31 +122,182 @@ Claim comment: https://github.com/finos/opengris-scaler/issues/177#issuecomment-
 
 **Environment Setup**
 
-[What a stranger would need to stand this up: your operating system,
-the relevant versions (language, runtime, package manager, the project
-itself), and how you set the project up. Then the challenges you faced
-and how you solved them, or that none came up.]
+- **System:** macOS 26.6.2 on Apple Silicon (arm64), with Apple clang 21.0.0 from the Command Line Tools in C++23 mode.
+- **Cap'n Proto:** 1.5.0 from Homebrew. The repo pins 1.1.0, but here it's only needed to compile `message.h`, which `object_manager.h` includes for `ObjectID`. `ObjectManager` makes no Cap'n Proto calls.
+- **Project:** opengris-scaler `main` at `e7fd9f0` (2026-11-18), with `object_manager.cpp` unmodified.
+
+I didn't use the repo's CMake build. This Mac has two problems:
+- **Broken Xcode:** `xcodebuild` fails to load a library, so plain `clang++` errors out. I called the Command Line Tools clang directly instead.
+- **No CMake:** `cmake` isn't installed, so I compiled `object_manager.cpp` directly instead of running `./scripts/build.sh`.
+
+Two more problems came up on the way:
+- **libc++ not found:** the Command Line Tools clang couldn't find the standard library headers, because its toolchain copy is missing. I passed the SDK's copy with `-isysroot` and `-isystem`.
+- **Generated header needed:** `message.h` needs a header generated from the repo's Cap'n Proto schema. I installed `capnp` with Homebrew and generated it with `capnp compile`.
+
+A natural 64-bit collision can't be found on demand: the issue puts the odds at 0.00000271% for 1M objects. So I forced one. I built `main`'s `object_manager.cpp` twice:
+- **Control:** with the real `std::hash`.
+- **Forced collision:** a header pre-included into that one file swaps `std::hash` for a stub that returns the same value for every payload.
+
+I compared the preprocessed file with and without the header. The only differences are that hash call and the consistent renaming of local variables named `hash`.
 
 **Steps to Reproduce**
 
-1. [Step 1]
-2. [Step 2]
-3. [Observed result]
+1. Clone the repo and check out the commit: `git clone https://github.com/finos/opengris-scaler && git -C opengris-scaler checkout e7fd9f0`.
+2. Install Cap'n Proto: `brew install capnp`.
+3. Save the three files below into a `repro/` folder.
+4. Run `CXXFLAGS="-isysroot $SDK -isystem $SDK/usr/include/c++/v1" bash repro/run.sh /path/to/opengris-scaler`, where `SDK=$(xcrun --show-sdk-path)`. With only the Command Line Tools, use `/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk`.
+5. Observed result: with the real hash, B round-trips. With the forced collision, `setObject(B)` returns A's payload and `getObject(B)` returns `"payload-A"`, including after A is deleted. `sizeUnique()` and `totalObjectsSize()` count one 9-byte object instead of two objects and 18 bytes.
+
+<details><summary><code>force_collision.h</code> (pre-included into <code>object_manager.cpp</code> only)</summary>
+
+```cpp
+// Pre-included (-include) ONLY into an unmodified object_manager.cpp to simulate a 64-bit hash collision.
+// Everything object_manager.cpp includes is pulled in first, so the macro below touches only the body of
+// object_manager.cpp: `std::hash<std::string_view>` there becomes `std::repro_colliding_hash<...>`,
+// which returns the same value for every payload. Local variables named `hash` are renamed consistently.
+#pragma once
+#include <algorithm>
+#include <cassert>
+#include <cstddef>
+#include <string_view>
+
+#include "scaler/object_storage/object_manager.h"
+
+namespace std {
+template <class T>
+struct repro_colliding_hash {
+    size_t operator()(T) const noexcept { return 0x5eed; }
+};
+}  // namespace std
+
+#define hash repro_colliding_hash
+```
+</details>
+
+<details><summary><code>repro_collision.cpp</code> (the input: two different payloads under two object IDs)</summary>
+
+```cpp
+// Stores two DIFFERENT payloads under two object IDs, then reads them back through ObjectManager's public API.
+#include <cstdio>
+#include <memory>
+#include <string>
+
+#include "scaler/object_storage/object_manager.h"
+#include "scaler/ymq/buffered_bytes.h"
+
+using scaler::object_storage::ObjectID;
+using scaler::object_storage::ObjectManager;
+
+static std::string show(const std::shared_ptr<const scaler::object_storage::ObjectPayload>& payload)
+{
+    return payload ? "\"" + payload->asString().value_or("<non-string>") + "\"" : "<null>";
+}
+
+int main()
+{
+    ObjectManager manager;
+    const ObjectID idA {1, 0, 0, 0};
+    const ObjectID idB {2, 0, 0, 0};
+
+    manager.setObject(idA, std::make_unique<scaler::ymq::BufferedBytes>(std::string("payload-A")));
+    auto returnedForB = manager.setObject(idB, std::make_unique<scaler::ymq::BufferedBytes>(std::string("payload-B")));
+
+    std::printf("setObject(B) returned        %s\n", show(returnedForB).c_str());
+    std::printf("getObject(A)                 %s\n", show(manager.getObject(idA)).c_str());
+    std::printf("getObject(B)                 %s   (expected \"payload-B\")\n", show(manager.getObject(idB)).c_str());
+    std::printf("size()=%zu sizeUnique()=%zu totalObjectsSize()=%zu   (expected 2, 2, 18)\n",
+                manager.size(), manager.sizeUnique(), manager.totalObjectsSize());
+
+    manager.deleteObject(idA);
+    std::printf("after deleteObject(A): getObject(B) %s   (expected \"payload-B\")\n",
+                show(manager.getObject(idB)).c_str());
+
+    const bool bIsCorrect = manager.getObject(idB) && manager.getObject(idB)->asString() == "payload-B";
+    std::printf("RESULT: %s\n", bIsCorrect ? "B round-trips correctly" : "B's bytes were replaced by A's");
+    return bIsCorrect ? 0 : 1;
+}
+```
+</details>
+
+<details><summary><code>run.sh</code></summary>
+
+```bash
+#!/bin/bash
+# Usage: ./run.sh /path/to/opengris-scaler
+# Needs: clang++ with C++23, Cap'n Proto (headers + `capnp` compiler).
+# On macOS with only Command Line Tools: CXXFLAGS="-isysroot $(xcrun --show-sdk-path)" or the CLT SDK path.
+set -euo pipefail
+SCALER="$(cd "${1:?path to opengris-scaler clone}" && pwd)"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+OUT="$HERE/build"
+CXX="${CXX:-clang++}"
+CAPNP_PREFIX="$(dirname "$(dirname "$(command -v capnp)")")"
+mkdir -p "$OUT/protocol"
+
+capnp compile -I"$CAPNP_PREFIX/include" -oc++:"$OUT/protocol" --src-prefix="$SCALER/src/protocol" \
+    "$SCALER/src/protocol/object_storage.capnp"
+
+FLAGS=(${CXXFLAGS:-} -std=c++23 -O0 -g -I"$SCALER/src/cpp" -I"$OUT" -I"$CAPNP_PREFIX/include")
+LIBS=(-L"$CAPNP_PREFIX/lib" -lcapnp -lkj)
+MANAGER="$SCALER/src/cpp/scaler/object_storage/object_manager.cpp"
+
+echo "scaler commit: $(git -C "$SCALER" rev-parse --short HEAD)  object_manager.cpp unmodified: $(git -C "$SCALER" diff --quiet HEAD -- src/cpp/scaler/object_storage && echo yes || echo NO)"
+
+"$CXX" "${FLAGS[@]}" "$HERE/repro_collision.cpp" "$MANAGER" "$OUT/protocol/object_storage.capnp.c++" "${LIBS[@]}" -o "$OUT/control"
+"$CXX" "${FLAGS[@]}" -c "$MANAGER" -include "$HERE/force_collision.h" -o "$OUT/object_manager_collide.o"
+"$CXX" "${FLAGS[@]}" "$HERE/repro_collision.cpp" "$OUT/object_manager_collide.o" "$OUT/protocol/object_storage.capnp.c++" "${LIBS[@]}" -o "$OUT/collision"
+
+echo; echo "=== control: real std::hash, two different payloads ==="; "$OUT/control" || true
+echo; echo "=== forced collision: same hash, two different payloads ==="; "$OUT/collision" || true
+```
+</details>
 
 **Reproduction Evidence**
 
-- **Commit showing reproduction:** [link to commit in your fork]
-- **Screenshots/logs:** [if applicable]
-- **My findings:** [what you discovered during reproduction; an
-  honest, evidenced cannot-reproduce that led you to re-pick or ask
-  the maintainer belongs here and costs you nothing]
+- **Commit showing reproduction:** none (the harness isn't in my fork)
+- **Screenshots/logs:** the output of `run.sh`, from my run on 2026-11-18:
+
+```text
+scaler commit: e7fd9f0  object_manager.cpp unmodified: yes
+
+=== control: real std::hash, two different payloads ===
+setObject(B) returned        "payload-B"
+getObject(A)                 "payload-A"
+getObject(B)                 "payload-B"   (expected "payload-B")
+size()=2 sizeUnique()=2 totalObjectsSize()=18   (expected 2, 2, 18)
+after deleteObject(A): getObject(B) "payload-B"   (expected "payload-B")
+RESULT: B round-trips correctly
+
+=== forced collision: same hash, two different payloads ===
+setObject(B) returned        "payload-A"
+getObject(A)                 "payload-A"
+getObject(B)                 "payload-A"   (expected "payload-B")
+size()=2 sizeUnique()=1 totalObjectsSize()=9   (expected 2, 2, 18)
+after deleteObject(A): getObject(B) "payload-A"   (expected "payload-B")
+RESULT: B's bytes were replaced by A's
+```
+
+- **My findings:**
+  - The bug is real on `main` today. When two different payloads share a hash, `setObject` finds the existing entry, only increments its use count (`object_manager.cpp:49`), and returns the first payload. The second payload's bytes are freed.
+  - From then on, the second object's ID reads the first object's bytes, including after the first object is deleted.
+  - The accounting stays consistent: one unique object, 9 bytes. So nothing in the server's totals shows that data was lost.
+  - The existing tests in `tests/cpp/object_storage/test_object_manager.cpp` all use the same `"Hello"` payload, so none of them covers this case.
+  - Limits: the collision is forced, not natural. I didn't run the object storage server (it calls these same methods at `object_storage_server.cpp:235` and `:251`) or the repo's GTest suite.
 
 **Toolkit**
 
-- Tool:
+- Tool: repro-check in live mode. I ran `claude "repro-check: grade my claim comment in claim-draft.md and my repro report in repro-draft.md for issue …"` twice. The voice guard also checked both drafts.
 - What it produced:
+  - Run 1: **hold**, with 1 of 7 required checks failing. Followable steps failed because only one of the three harness files was in the report: `repro_collision.cpp` was an excerpt and `run.sh` was only described.
+  - Run 2: **accept**, with all 7 required checks passing. It checked my line citations against `e7fd9f0` and checked that the report's output matches my run log line for line.
 - Difficulties:
+  - repro-check only reads; it can't run the harness. It checks a reproduction by comparing the report with the code and the log, not by repeating it.
+  - My claim was already posted, so it graded `claim-draft.md` as an edit to the posted comment.
+  - It flagged two problems with the posted claim. It breaks my claims rule ("open a PR within about a week"). And it says the 128-bit hash was "the route that @gxuu mentioned", but gxuu actually suggested just checking for collisions.
 - What changed:
+  - I pasted the full `run.sh` and `repro_collision.cpp` into the report, and changed the command to `bash repro/run.sh` so a copied script runs.
+  - I restored the posted comment's Markdown in `claim-draft.md`.
+  - Still to do: edit the posted claim with the new timeframe line and correct how it describes gxuu's suggestion.
 
 ---
 
