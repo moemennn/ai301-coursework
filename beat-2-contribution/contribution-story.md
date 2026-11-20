@@ -356,7 +356,7 @@ What I'm deliberately not changing:
    - `fix(object_storage): compare payload bytes when hashes match`, with the collision tests.
 8. Confirm my FINOS individual CLA is on file, since CONTRIBUTING.md says nothing merges without one.
 9. Open the PR from my fork. In its description:
-   - Ask about the hash-function constructor and the version bump.
+   - Ask about the version bump. State the hash-function constructor as my choice and offer to change it, instead of asking about it too (see Deviations).
    - Say in one line why I stored both payloads instead of only detecting the collision (gxuu's first suggestion): detecting it alone would leave B with no correct place to be stored.
    - List each deviation below.
    - Say how I used AI tools.
@@ -376,6 +376,7 @@ Deviations:
   - I also renamed `hashToObject` to `hashToObjects`, since it now holds several payloads per hash.
   - The ID record is named `ObjectLocation`.
   - `sizeUnique()` uses a `uniqueObjectsCount` counter instead of walking the buckets, so it stays constant-time.
+- **2026-11-20, step 9:** my voice guard stopped the PR draft because it asked two questions, and my rule is one at a time. The draft now asks only about the version bump. It states the hash-function constructor as my choice and offers to change it.
 
 **Toolkit**
 
