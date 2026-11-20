@@ -535,7 +535,8 @@ It links my claim, and says I built before a reply and will rework it for a 128-
 
 **Maintainer Feedback:**
 
-- 2026-11-20: no maintainer feedback yet. The `linux-foundation-easycla` bot commented that the CLA is not signed, and the EasyCLA check is failing. CONTRIBUTING.md says nothing merges without a FINOS CLA, so signing it through the bot's link is my next step.
+- 2026-11-20: no maintainer feedback yet. The `linux-foundation-easycla` bot commented that the CLA is not signed, and the EasyCLA check is failing. CONTRIBUTING.md says nothing merges without a FINOS CLA, so I needed to sign it.
+- 2026-11-20: I signed the CLA. The bot updated its comment to say I'm authorized under a signed CLA, and the EasyCLA check now passes. There's still no maintainer feedback.
 
 **Status:** Awaiting review
 
@@ -556,7 +557,7 @@ It links my claim, and says I built before a reply and will rework it for a 128-
   - I fixed the commit line in the description.
   - I checked the commit bodies by hand: no trailers.
   - My rubric needed no change, because every stop was right.
-  - Next: sign the FINOS CLA.
+  - I signed the FINOS CLA after the bot flagged it, and the EasyCLA check now passes.
 
 ---
 
