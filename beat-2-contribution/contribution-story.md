@@ -400,17 +400,65 @@ Deviations:
 
 ## Testing Strategy
 
-[What observable checks prove the fix: your reproduction steps re-run
-against the built change (before and after), and the repo's own test
-suite or checks with the outcome shown. "Tests pass" with nothing
-observable named is not a strategy.]
+Every output below is pasted in full in `test_evidence.md` in my clone, from runs on 2026-11-19 against branch head `6df0ae1`.
+
+**1. My reproduction, before and after**
+
+- **Before, on today's `main`:** my unchanged Unit 6 harness (`force_collision.h`, `repro_collision.cpp`, `run.sh`), run on a clean worktree of upstream `main` (`45fd02d`). It prints the same failure as on 2026-11-18: with the forced collision, `getObject(B)` returns `"payload-A"`, `sizeUnique()` is 1, and `totalObjectsSize()` is 9. The control with the real hash returns `"payload-B"`, 2, and 18.
+- **Same harness on both sides:** `force_collision.h` can't compile against the fix, because its `#define hash` also renames the new `ObjectLocation::hash` field. So a copy of `repro_collision.cpp` sets the constant hash (`0x5eed`) through the new constructor; it's a one-line diff. I ran it on `b4998a0`, which has the constructor but the old storage, and on `6df0ae1`:
+
+  | | `setObject(B)` returns | `getObject(B)` | `sizeUnique()` | `totalObjectsSize()` | after deleting A | exit |
+  |---|---|---|---|---|---|---|
+  | before (`b4998a0`) | `"payload-A"` | `"payload-A"` | 1 | 9 | `"payload-A"` | 1 |
+  | after (`6df0ae1`) | `"payload-B"` | `"payload-B"` | 2 | 18 | `"payload-B"` | 0 |
+
+**2. New tests that fail before the fix and pass after**
+
+All three are in `tests/cpp/object_storage/test_object_manager.cpp`.
+
+- **`TestHashCollisionKeepsPayloadsApart`:** uses a hash that returns 42 for every payload.
+  - It checks that A and B keep their own bytes, that a duplicate of B returns B, that B survives deleting A, and that the totals are 2 and 18, then 0 after everything is deleted.
+  - Before the fix, 8 assertions failed, with the repro's values (`"payload-A"`, 1, 9).
+- **`TestHashCollisionStillSharesIdenticalPayloads`:** two identical payloads under the same hash still share one copy (the same pointer, `sizeUnique()` 1). It passes before and after. It guards against a fix that simply stops deduplicating.
+- **`TestDuplicateObjectOntoItself`:** without the guard, the test binary crashed with a segfault (exit 139). With it, the test passes.
+
+**3. `duplicateObject(a, a)` directly**
+
+- **On `main`:** it returns null. With one owner, it counts 0 bytes for 1 stored object.
+- **On the fix:** it returns the payload and the counts are unchanged, with one owner or two.
+
+**4. The project's own checks: every row of my ship manifest, as written, in a fresh shell**
+
+| Row | Result |
+|---|---|
+| C++ build (`./scripts/build.sh`) | exit 0 |
+| Rebuild the Python extensions into `.venv` | exit 0 |
+| `./scripts/test.sh` | 6 of 6 ctest targets passed, including `test_object_manager` (8 of 8 tests) and `test_object_storage_server` |
+| clang-format 21 on every `.cpp`/`.h` file | no output, exit 0 |
+| Python object storage tests | 10 passed, including the WebSocket parity test, which sends SET/GET through real C++ server processes |
+| ruff, ruff format, mypy | all pass, with no mypy issues in 411 files |
+
+**Not verified**
+
+- **A natural collision:** every collision here is forced.
+- **A collision through the running server:** the server tests and the WebSocket parity test go through the server, but with the real hash, so they show the server still works, not that it handles a collision.
+- **Linux (libstdc++) and Windows (MSVC):** I only built with LLVM 21 on macOS. CI runs all three.
+- **The full Python suite:** it's excluded in my manifest, because on `main` on this Mac, 6 tests time out under load and the run takes about 19 minutes. CI runs it.
+- **Performance:** I didn't measure the cost of the byte comparison. The cost claim rests on rafa-be's benchmark.
 
 **Toolkit**
 
-- Tool:
-- What it produced:
+- Tool: my ship manifest's six checks and my Unit 6 repro harness. I ran each manifest row exactly as written, in a fresh shell with no virtual environment, the way the ship-gate runs them. A small script read the commands out of `ship-manifest.md` so I couldn't drift from what the gate will run. The ship-gate itself, with pr-precheck, runs at the PR step.
+- What it produced: all six rows pass on `6df0ae1` in about a minute. The repro shows the failure on `main` and on `b4998a0`, and correct output on the fix. Everything is in `test_evidence.md`.
 - Difficulties:
+  - The harness's `#define hash` trick doesn't survive a new field named `hash`.
+  - AddressSanitizer builds hang at run time on this Mac, even for code that's fine, so I couldn't use it for the `duplicateObject` check.
+  - My manifest can't run the full Python suite within the gate's budget, so it narrows to the object storage tests.
+  - In a zsh loop, `$rev:src` was read as a substitution modifier and mangled my `git show` paths on the first try.
 - What changed:
+  - I ran the harness through the new constructor, on `b4998a0` before and `6df0ae1` after, so both sides use the same program. I kept the original harness on `main` for continuity with my repro report.
+  - I compared plain builds instead of sanitizer builds.
+  - I wrote `${rev}`, with braces.
 
 ---
 
@@ -452,10 +500,18 @@ observable named is not a strategy.]
 
 **Toolkit**
 
-- Tool:
+- Tool: Claude Code built the change on my branch, with `plan.md` as the scope to stay inside and my `CLAUDE.local.md` for the repo's rules (Conventional Commits, no agent trailer, a failing test before the fix). It ran the object storage tests and clang-format after each commit, and the full manifest before the fix commit. It asked me before each decision that wasn't in the plan.
 - What it produced:
+  - Three commits: `b4998a0` (refactor), `f83bd6f` (guard) and `6df0ae1` (fix), with three new tests. Each test was seen failing before its change.
+  - Dated notes, and a Deviations list in the plan.
 - Difficulties:
+  - **Scope:** the plan's own check after step 5 found that the new per-ID record turned the `duplicateObject(id, id)` read of freed memory into a segfault that a client can trigger. My plan had kept that bug out of the PR. plan-check had warned that "neither fixes nor changes" might not hold, and it didn't.
+  - **Commit order:** putting the guard before the fix meant stashing the fix. The stash conflicted in the test file, and a typo in my command dropped the stash before the resolved file was copied in. The resolved file was already saved, so nothing was lost.
+  - **Style:** AGENTS.md's `_camelCase` field rule disagrees with how `ObjectManager` names its fields today.
 - What changed:
+  - The guard got its own commit before the fix, so no commit on the branch can crash the server. The plan, `plan.md` and Deviations record it, and the PR description will list it.
+  - New fields follow the file's existing names. The style question isn't mine to settle in this PR.
+  - I added AddressSanitizer's hang on this Mac to my notes, so I don't lose time on it again.
 
 ---
 
