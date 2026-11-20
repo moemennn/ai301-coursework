@@ -11,7 +11,7 @@ files and no evidence uploads are part of Assignment 5.
 **Student:** Moemen Ibrahim
 **GitHub Username:** moemennn
 **Issue:** https://github.com/finos/opengris-scaler/issues/177
-**Pull Request:** [GitHub PR link, once opened]
+**Pull Request:** https://github.com/finos/opengris-scaler/pull/1106
 
 One repository, built across units 5 to 8, telling the whole story of your real
 contribution. Fill it as you work, not at the end — the sections below ask for evidence that
@@ -62,10 +62,9 @@ I wrote a search strategy for issue-scout: 14 `gh search issues` queries, each t
 
 I merged my three voice-guide copies into one guide with an Upstream section for claims, questions, and pings, and hooked the guard into Claude Code, where the wiring test stopped `gh issue comment --help` as it should. Its first real check came 20 minutes after I had already posted my claim, and it stopped on my own claims rule: "I'm aiming to open a PR within about a week" promises a PR before the maintainers have chosen a design. The revised line passed, but the posted comment still has the original, so I now post through Claude Code with `--body-file`, where the hook checks a draft before it goes up. My `CLAUDE.local.md` for opengris-scaler distills CONTRIBUTING.md and one orientation pass over the object storage code, and writing it caught two things I'd have gotten wrong: a stale version-bump path that recent PRs skip (I'll ask about it in my PR), and an AGENTS.md ban on agent `Co-authored-by` trailers, which the file now tells Claude to follow.
 
-**Unit 7: [one line on the tool work]**
+**Unit 7: wrote my ship manifest, ran the ship-gate on my branch until it passed, and opened PR #1106 through it (2026-11-20)**
 
-[2-4 sentences: the ship-gate and your gate manifest. What it produced
-on your real branch, what fought you, what changed because of it.]
+My manifest lists six of the project's own checks: the C++ build and `./scripts/test.sh`, clang-format, the Python object storage tests, and ruff and mypy. Getting it to run on this Mac meant installing CMake and LLVM 21 and steering around Anaconda's old linker. I also excluded the full Python suite, because on `main` 6 of its tests time out under load and it takes about 19 minutes. On my branch, the gate stopped three times before it said PASS: (1) its `python3` is Anaconda's Intel build, so the build ran under Rosetta and picked the x86_64 preset, and I now run those scripts through `arch -arm64`; (2) pr-precheck saw 24 changed files, because the gate diffs against my local `main`, which was one upstream commit behind, so I fast-forwarded it; (3) pr-precheck caught a false line in my description, "Commits, each with its tests", when my refactor commit has none, and I fixed the line. None of these needed a rubric change. Each stop was right about my setup or my words.
 
 **Unit 8: [one line on the tool work]**
 
@@ -518,27 +517,46 @@ All three are in `tests/cpp/object_storage/test_object_manager.cpp`.
 
 ## Pull Request
 
-**PR Link:** [GitHub PR URL when opened]
+**PR Link:** https://github.com/finos/opengris-scaler/pull/1106
 
-**PR Description:** [what the PR says; much of the content above
-adapts into it]
+**PR Description:** It starts with `Fixes #177`. The description covers:
+
+- **The cause:** `ObjectManager` identified a payload by its 64-bit `std::hash` alone, so a colliding payload shared the first one's storage.
+- **The fix:** each hash holds a bucket of payloads, and `setObject` compares bytes before sharing. Each ID records its exact payload. `sizeUnique()` counts payloads. A new `explicit` constructor takes the hash function, so tests can force collisions.
+- **The `duplicateObject(id, id)` guard,** and why it's in this PR: the new per-ID record made a client-triggerable read of freed memory crash the server.
+- **Why both payloads are stored** instead of gxuu's detect-only option.
+- **The three commits** and which tests each carries.
+- **Before and after:** the same harness on `b4998a0` and `6df0ae1` (`"payload-A"`, 1 object, 9 bytes, then `"payload-B"`, 2 objects, 18 bytes), and the `duplicateObject(a, a)` results.
+- **The checks that passed,** and what I didn't verify (a natural collision, a collision through a running server, Linux and Windows, the full Python suite, performance).
+- **One question:** whether to bump `src/scaler/version.txt`, since `scaler/about.py` no longer exists.
+- **How I used Claude Code.**
+
+It links my claim, and says I built before a reply and will rework it for a 128-bit hash if the maintainers want that.
 
 **Maintainer Feedback:**
 
-- [Date]: [feedback received, or "none yet"; silence is a normal
-  state and costs you nothing]
-- [Date]: [how you addressed it]
+- 2026-11-20: no maintainer feedback yet. The `linux-foundation-easycla` bot commented that the CLA is not signed, and the EasyCLA check is failing. CONTRIBUTING.md says nothing merges without a FINOS CLA, so signing it through the bot's link is my next step.
 
-**Status:** [Awaiting review / Iterating / Merged / Closed. The
-status is a fact you record, never a grade: the PR is graded as
-opened.]
+**Status:** Awaiting review
 
 **Toolkit**
 
-- Tool:
+- Tool: the ship-gate. I ran `python3 ~/.claude/ship-gate/check_gate.py --branch --title "fix(object_storage): compare payload bytes when hashes match" --body-file pr_draft.md` until it passed. Then I opened the PR through `claude "run this command: ..."`, where the voice guard and the ship-gate hooks check the command.
 - What it produced:
+  - Four runs: a failed build check, two pr-precheck **reject**s, then **PASS**. The PASS covered all 6 manifest checks, plus all 6 required and 2 preferred pr-precheck checks.
+  - When I opened the PR, the hook honored that PASS without rerunning (it was within 30 minutes, with the same fingerprints for branch, title, body, manifest, plan and evidence), and the voice guard passed the description. The PR opened on `finos/opengris-scaler` as #1106.
 - Difficulties:
+  - **Rosetta:** the gate's `python3` is Anaconda's x86_64 build, so `./scripts/build.sh` ran under Rosetta, chose `build_darwin_x86_64`, and failed to link gtest. My manual runs had passed only because they started from an arm64 shell.
+  - **Stale local `main`:** the gate diffs against my local `main`, which was still at my repro commit `e7fd9f0`. pr-precheck counted upstream's newer ymq/openssl commit as 21 unrelated files in my diff.
+  - **A false claim:** pr-precheck caught "Commits, each with its tests" in my description.
+  - **What it couldn't see:** pr-precheck only sees commit subjects, so it couldn't check for the `Co-authored-by` trailer AGENTS.md bans. It can't see the CLA either, and the EasyCLA bot showed right away that mine isn't signed.
 - What changed:
+  - Manifest rows 1 to 3 now run their scripts through `arch -arm64`, with the reason in the Source column. I tested them from the same x86_64 `python3`.
+  - I fast-forwarded local `main` to upstream `main`, and kept it tracking my fork.
+  - I fixed the commit line in the description.
+  - I checked the commit bodies by hand: no trailers.
+  - My rubric needed no change, because every stop was right.
+  - Next: sign the FINOS CLA.
 
 ---
 
