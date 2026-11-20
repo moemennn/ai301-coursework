@@ -95,26 +95,28 @@ Claim comment: https://github.com/finos/opengris-scaler/issues/177#issuecomment-
 
 **Problem Description**
 
-[In your own words, what is broken or missing?]
+The object storage server saves memory by storing each distinct payload only once. It decides two payloads are the same when their 64-bit `std::hash` values match, and it never compares the bytes. So if two different payloads ever get the same hash, the server keeps only the first one, and the second object's ID returns the first object's bytes. A collision is very unlikely, but when one happens the data is wrong and nothing reports an error.
 
 **Expected Behavior**
 
-[What should happen?]
+Every object ID returns exactly the bytes that were stored under it. Identical payloads still share one stored copy. Two different payloads that happen to share a hash are both stored, and `sizeUnique()` and `totalObjectsSize()` count both of them.
 
 **Current Behavior**
 
-[What actually happens?]
+When a new payload's hash is already in the table, `setObject` adds one to the existing entry's use count and returns the existing payload (`object_manager.cpp:47-52`). The new payload's bytes are freed. With a forced collision, `getObject(B)` returns `"payload-A"`, and still does after A is deleted. `sizeUnique()` reports 1 object and `totalObjectsSize()` 9 bytes, instead of 2 objects and 18 bytes. Without the forced collision, B round-trips correctly.
 
 **Affected Components**
 
-[Which parts of the codebase are involved?]
+- `src/cpp/scaler/object_storage/object_manager.h` and `object_manager.cpp`: the `ObjectManager` class, its two maps (`objectIDToHash`, `hashToObject`), and `setObject`, `getObject`, `deleteObject`, `duplicateObject` and `sizeUnique`.
+- `src/cpp/scaler/object_storage/object_storage_server.cpp`: the only caller. It handles SET (`:235`), GET (`:251`), DELETE (`:264`), DUPLICATE (`:288`, `:407`) and the totals (`:308-310`). It passes along whatever `ObjectManager` returns, so it serves the wrong bytes without knowing it, but its code doesn't need to change.
+- `tests/cpp/object_storage/test_object_manager.cpp`: every test stores the same `"Hello"` payload, so no test has two different payloads, let alone two with the same hash.
 
 **Toolkit**
 
-- Tool:
-- What it produced:
-- Difficulties:
-- What changed:
+- Tool: Claude Code, using my `CLAUDE.local.md` notes on the object storage code as its map. It reread the issue thread, traced `ObjectManager` on upstream `main` (`45fd02d`), and checked that no object storage C++ had changed since my repro commit `e7fd9f0`.
+- What it produced: the four answers above, with line references, plus two facts I hadn't written down. The issue's file link points to the old path `scaler/object_storage/`; the code now lives under `src/cpp/scaler/object_storage/`. And `std::hash` isn't Murmur everywhere, as the issue says: each standard library uses its own algorithm (libc++ on macOS, libstdc++ on Linux, MSVC on Windows), so the collision odds and any colliding pair depend on the platform.
+- Difficulties: no maintainer has answered my claim yet. The thread leans toward the equality check (rafa-be proposed it, and gxuu and I-Need-Sleep-Asap went along with it), but nobody has confirmed the design for this PR.
+- What changed: since a known natural collision can't serve as a test input on every platform, the plan passes the hash function into `ObjectManager` so a test can force collisions. It also waits for a maintainer to confirm the design before any code.
 
 ---
 
@@ -305,29 +307,77 @@ RESULT: B's bytes were replaced by A's
 
 **Analysis**
 
-[Your analysis of the root cause: what is causing the issue, traced
-to the files and functions involved.]
+The cause is that `ObjectManager` uses a payload's 64-bit hash as the payload's identity. Every path below is under `src/cpp/scaler/object_storage/`.
+
+- **The data model can't hold a collision.** `object_manager.h:53-54` has two maps: `objectIDToHash` (object ID → hash) and `hashToObject` (hash → one `ManagedObject {useCount, payload}`). With the hash as the key, two different payloads with the same hash can't both be stored.
+- **`setObject` never compares bytes.** `computePayloadHash` (`object_manager.cpp:10-13`) hashes the bytes with `std::hash<std::string_view>`. `setObject` (`:19-53`) records the ID's hash (`:29`) and looks it up (`:31`). If the hash is already there, it only adds one to `useCount` (`:49`) and returns the stored payload (`:52`). The new `unique_ptr` goes out of scope, and its bytes are freed.
+- **Every read follows the hash.** `getObject` (`:55-64`), `deleteObject` (`:66-89`) and `duplicateObject` (`:91-114`) all go from ID to hash to that one entry. After a collision, they all act on the first payload. `sizeUnique()` (`:126-129`) counts hash keys, so it counts the two objects as one.
+- **The server passes the wrong bytes on.** `object_storage_server.cpp` sends `ObjectManager`'s results straight to clients: SET `:235`, GET `:251`, DELETE `:264`, DUPLICATE `:288` and `:407`, and the totals at `:308-310`. From reading that code, a client asking for B would get A's bytes, and nothing would report an error. I haven't run a collision through the server.
+- **The reproduction agrees.** Forcing every hash to the same value makes `getObject(B)` return `"payload-A"`, including after A is deleted, with 1 unique object and 9 bytes counted. The control build with the real hash returns `"payload-B"`, with 2 objects and 18 bytes.
+- **Why the tests miss it.** Every test in `tests/cpp/object_storage/test_object_manager.cpp` stores the same `"Hello"` payload.
+- **`std::hash` differs by platform.** Its algorithm depends on the standard library: libc++ on macOS, libstdc++ on Linux, MSVC on Windows. So a test can't rely on a known pair of colliding payloads, and it has to force the collision.
 
 **Proposed Solution**
 
-[High-level description of your fix approach, and what you are
-deliberately NOT changing.]
+This follows rafa-be's suggestion in the thread: keep `std::hash` and add an equality check. It works like `std::unordered_set` does, which gxuu named as the fallback. My claim already asks rafa-be to choose between this and a 128-bit hash, and I won't build until that's answered (step 1 below).
+
+- **One hash, several payloads.** `hashToObject` becomes `std::map<ObjectHash, std::vector<ManagedObject>>`. The vector holds every distinct payload with that hash, and it almost always has one entry.
+- **`setObject` compares before sharing.** In the hash's bucket, it looks for an entry with the same size and the same bytes (`std::equal` over `data()`; `Bytes` has no `operator==`). On a match, it adds one to `useCount` and returns that payload, as it does today. With no match, it adds a new entry and adds its size to `totalObjectsBytes`.
+- **Each ID knows its exact payload.** `objectIDToHash` becomes a map from ID to a small `{hash, payload}` record. Since it no longer holds only a hash, I'll rename it `objectIDToObject` and update every use. `getObject` returns the record's payload directly. `deleteObject` and `duplicateObject` find the entry in the bucket by comparing payload pointers, not bytes, and remove a bucket once it's empty. `sizeUnique()` counts payloads, not hash keys.
+- **The hash function can be passed in.** A new `explicit ObjectManager(PayloadHashFunction)` constructor takes the hash function, where `PayloadHashFunction` is a plain function pointer, `ObjectHash (*)(const ObjectPayload&)`. The default constructor keeps using `computePayloadHash`, so the server keeps working unchanged. Tests pass in a function that returns the same value for every payload, which forces a collision.
+- **Cost:** the byte comparison only runs when the hash already exists, which almost always means a real duplicate. In rafa-be's benchmark, comparing took 0.7 to 0.85 times as long as hashing up to 500 MB, and about 2.4 times as long at 2 GB. Storing a payload whose hash isn't in the table costs what it does today.
+
+What I'm deliberately not changing:
+
+- The hash function: no 128-bit hash, no xxHash, no new dependency.
+- `ObjectManager`'s public methods: their signatures, return values, and the dedup of identical payloads.
+- `object_storage_server.cpp`, the protocol, and the Python code.
+- The possible read of freed memory in `duplicateObject(id, id)`: `hashIt` from `:94` is used at `:105` after `deleteObject` erases it at `:86`. I'll keep the steps in that function in the same order and won't try to fix it here. The new ID map could still change what that call does, so after step 5 I'll check `duplicateObject(id, id)` and note in the PR whether it behaves differently. If I reproduce the bug, I'll report it separately.
+- The version number. CONTRIBUTING.md asks for a bump in `scaler/about.py`, which no longer exists, and recent merged PRs haven't bumped `src/scaler/version.txt`. I'll ask in the PR.
 
 **Implementation Plan**
 
-1. [Modify file X to do Y]
-2. [Add or change Z]
-3. [Update tests]
+1. Wait for a reply to my claim on #177 (posted 2026-11-19), which already asks rafa-be to choose between the equality check and a 128-bit hash. Write no code until then. If the reply picks the equality check, start at step 2. If it picks the 128-bit hash, rewrite this plan. This plan comment stays a local draft and isn't posted, so I'll ask whether the hash-function constructor is an acceptable way to test collisions in the PR description instead.
+2. Add an `upstream` remote and branch from the latest `finos/opengris-scaler` `main` (`45fd02d` or later).
+3. In `object_manager.h` and `object_manager.cpp`, add a `PayloadHashFunction` type and the `explicit ObjectManager(PayloadHashFunction)` constructor. The default constructor passes `computePayloadHash`. Nothing else changes yet.
+4. In `tests/cpp/object_storage/test_object_manager.cpp`, add tests that build an `ObjectManager` with a hash that always returns the same value:
+   - Two different payloads, `"payload-A"` and `"payload-B"`: B reads back as `"payload-B"`. `sizeUnique()` is 2 and `totalObjectsSize()` is 18. B still reads back after A is deleted. A duplicate of B returns B's bytes. Deleting everything brings the totals back to 0.
+   - Two identical payloads with the same hash still share one copy: `sizeUnique()` is 1.
 
-[Record deviations here as they happen: what changed mid-build and
-why. A recorded deviation is honest work; silent drift is not.]
+   Run `ctest --preset darwin-arm64 -R test_object_manager` and confirm the collision test fails on the unchanged storage code.
+5. Change `ObjectManager` as described in Proposed Solution: the bucket and ID-record types in `object_manager.h`, and `setObject`, `getObject`, `deleteObject`, `duplicateObject` and `sizeUnique` in `object_manager.cpp`. Follow the file's existing style. Rerun the new tests and confirm they pass.
+6. Verify:
+   - Run my ship manifest's checks: the C++ build and `./scripts/test.sh`, clang-format on all C++ files, the Python object storage tests, and ruff and mypy.
+   - Rerun my repro harness (`force_collision.h`, `repro_collision.cpp` and `run.sh`, printed in full in my contribution story's Reproduction Process section and saved to a `repro/` folder outside the clone) against the changed `object_manager.cpp`. The forced-collision run should now print `"payload-B"` with 2 objects and 18 bytes, the same as the control.
+7. Commit with Conventional Commits, one concern per commit, and no agent `Co-authored-by` trailer:
+   - `refactor(object_storage): let ObjectManager take its payload hash function`, for step 3.
+   - `fix(object_storage): compare payload bytes when hashes match`, with the tests.
+8. Confirm my FINOS individual CLA is on file, since CONTRIBUTING.md says nothing merges without one.
+9. Open the PR from my fork. In its description:
+   - Ask about the hash-function constructor and the version bump.
+   - Say in one line why I stored both payloads instead of only detecting the collision (gxuu's first suggestion): detecting it alone would leave B with no correct place to be stored.
+   - Say how I used AI tools.
+
+Deviations: none yet.
 
 **Toolkit**
 
-- Tool:
+- Tool: plan-check in live mode. I ran `claude "plan-check: grade my plan in plan.md and draft comment in plan-comment.md for issue https://github.com/finos/opengris-scaler/issues/177"` from my clone, revised, and reran it until it accepted.
 - What it produced:
+  - Run 1 was **reject**, with 1 of 7 required checks failing. Thread and repository alignment failed because my step 1 said to post the plan comment on #177, and my scope keeps plan comments off the thread.
+  - After I revised, the next three runs were all **accept**, with every check passing.
+  - It checked every line number against the source. It confirmed `object_manager.cpp` is the same blob on `e7fd9f0` and upstream `45fd02d`, and it checked my cost numbers against rafa-be's benchmark table.
 - Difficulties:
+  - Run headless with `claude -p`, it couldn't read its own rubric and procedure, because they're outside the clone. It stopped without grading, which is the right behavior, until I passed `--add-dir ~/.claude/skills/plan-check` and allowed its read-only `gh` and `git` calls.
+  - It can't run my repro harness, so it graded the forced-collision results as the drafts quote them.
+  - My `procedure.md` is written for eval bundles ("Repo facts", "Thread highlights"). It doesn't say where each one comes from in live mode, or what to use when no repro comment is posted.
 - What changed:
+  - Step 1 now waits for a reply to my posted claim instead of posting the plan. The constructor question moved into the PR description.
+  - I fixed my cost claim ("about the same cost as the hash" didn't hold at 2 GB, where comparing took 2.4 times as long). I rename `objectIDToHash`, since it will hold more than a hash, and I named the hash function's type.
+  - I no longer claim the PR can't change `duplicateObject(id, id)`. Instead, I'll check it after the change.
+  - I marked the server behavior as read from the code, not run. I added the FINOS CLA check, and a PR line on why I chose buckets over gxuu's detect-only option.
+  - In the comment, I replaced a self-contradicting sentence ("unmodified … with `std::hash` replaced") with how the collision was actually forced.
+  - Still to patch in `procedure.md`: say where each evidence section comes from in live mode.
 
 ---
 
