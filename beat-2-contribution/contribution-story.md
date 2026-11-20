@@ -332,7 +332,7 @@ What I'm deliberately not changing:
 - The hash function: no 128-bit hash, no xxHash, no new dependency.
 - `ObjectManager`'s public methods: their signatures, return values, and the dedup of identical payloads.
 - `object_storage_server.cpp`, the protocol, and the Python code.
-- The possible read of freed memory in `duplicateObject(id, id)`: `hashIt` from `:94` is used at `:105` after `deleteObject` erases it at `:86`. I'll keep the steps in that function in the same order and won't try to fix it here. The new ID map could still change what that call does, so after step 5 I'll check `duplicateObject(id, id)` and note in the PR whether it behaves differently. If I reproduce the bug, I'll report it separately.
+- ~~The possible read of freed memory in `duplicateObject(id, id)`: I won't fix it here.~~ Changed during the build (see Deviations). The new ID record turned that read into a server crash, so the PR now guards `duplicateObject(id, id)` in its own commit. `hashIt` from `:94` is used at `:105` after `deleteObject` erases it at `:86`.
 - The version number. CONTRIBUTING.md asks for a bump in `scaler/about.py`, which no longer exists, and recent merged PRs haven't bumped `src/scaler/version.txt`. I'll ask in the PR.
 
 **Implementation Plan**
@@ -348,17 +348,34 @@ What I'm deliberately not changing:
 5. Change `ObjectManager` as described in Proposed Solution: the bucket and ID-record types in `object_manager.h`, and `setObject`, `getObject`, `deleteObject`, `duplicateObject` and `sizeUnique` in `object_manager.cpp`. Follow the file's existing style. Rerun the new tests and confirm they pass.
 6. Verify:
    - Run my ship manifest's checks: the C++ build and `./scripts/test.sh`, clang-format on all C++ files, the Python object storage tests, and ruff and mypy.
-   - Rerun my repro harness (`force_collision.h`, `repro_collision.cpp` and `run.sh`, printed in full in my contribution story's Reproduction Process section and saved to a `repro/` folder outside the clone) against the changed `object_manager.cpp`. The forced-collision run should now print `"payload-B"` with 2 objects and 18 bytes, the same as the control.
+   - Rerun my repro harness (`force_collision.h`, `repro_collision.cpp` and `run.sh`, printed in full in my contribution story's Reproduction Process section and saved to a `repro/` folder outside the clone) against the changed `object_manager.cpp`. The forced-collision run should now print `"payload-B"` with 2 objects and 18 bytes, the same as the control. Changed during the build: `repro_collision.cpp` now builds `ObjectManager` with a constant hash through the new constructor, run before (`b4998a0`) and after the fix (see Deviations).
+   - Check `duplicateObject(id, id)` on the old and new code.
 7. Commit with Conventional Commits, one concern per commit, and no agent `Co-authored-by` trailer:
    - `refactor(object_storage): let ObjectManager take its payload hash function`, for step 3.
-   - `fix(object_storage): compare payload bytes when hashes match`, with the tests.
+   - `fix(object_storage): make duplicating an object onto its own ID a no-op`, with its test. Added during the build.
+   - `fix(object_storage): compare payload bytes when hashes match`, with the collision tests.
 8. Confirm my FINOS individual CLA is on file, since CONTRIBUTING.md says nothing merges without one.
 9. Open the PR from my fork. In its description:
    - Ask about the hash-function constructor and the version bump.
    - Say in one line why I stored both payloads instead of only detecting the collision (gxuu's first suggestion): detecting it alone would leave B with no correct place to be stored.
+   - List each deviation below.
    - Say how I used AI tools.
 
-Deviations: none yet.
+Deviations:
+
+- **2026-11-19, step 1:** I built before rafa-be replied to my claim. The branch is local, and nothing is pushed. If the reply picks the 128-bit hash, I'll rewrite the branch.
+- **2026-11-19, `duplicateObject(id, id)` is now in scope:**
+  - My plan left this bug out. But with the new `{hash, payload}` record, `duplicateObject(a, a)` crashed with a segfault (exit 139), whether the payload had one owner or two. On `main` it returns null and leaves 0 bytes counted for 1 stored object.
+  - A client can trigger it: `processDuplicateRequest` passes the client's two IDs straight through. So my change would have turned silent corruption into a server crash.
+  - It's now its own commit: an early return when the two IDs match, with a test that crashes without it.
+- **2026-11-19, step 6 harness:**
+  - `force_collision.h` renames every token named `hash`, and that now includes the new `ObjectLocation::hash` field, so the forced-collision build no longer compiles.
+  - I didn't rename the field to suit the harness. Instead, a copy of `repro_collision.cpp` builds `ObjectManager` with a constant hash (`0x5eed`) through the new constructor; it's a one-line diff, with the same payloads and printouts.
+  - I ran it against `b4998a0` (the constructor, with the old storage) and against the fix.
+- **2026-11-19, smaller choices:**
+  - I also renamed `hashToObject` to `hashToObjects`, since it now holds several payloads per hash.
+  - The ID record is named `ObjectLocation`.
+  - `sizeUnique()` uses a `uniqueObjectsCount` counter instead of walking the buckets, so it stays constant-time.
 
 **Toolkit**
 
@@ -399,16 +416,39 @@ observable named is not a strategy.]
 
 ## Implementation Notes
 
-[A running log, added to as you work. Date each entry. What you
-built, decisions you made when you made them, wrong turns included.]
+**2026-11-19: branch and refactor**
 
-**[Date]**
+- rafa-be hadn't replied to my claim, which my plan's step 1 waits for. I chose to build on a local branch anyway and record it as a deviation.
+- I added `upstream` and branched `fix/177-hash-collision` from upstream `main` at `45fd02d`. `object_manager.cpp` hadn't changed since my repro commit `e7fd9f0`.
+- I unset the branch's tracking of `upstream/main`, so a stray `git push` can't target the upstream repo.
+- Refactor `b4998a0`: `ObjectManager` takes a `PayloadHashFunction` (`ObjectHash (*)(const ObjectPayload&) noexcept`). The default constructor passes `computePayloadHash`, and `ObjectHash` moved to `public` so the type can be named.
+- The object storage tests still passed (2 of 2 ctest targets), and clang-format was clean.
+- AGENTS.md wants `_camelCase` private fields, but `ObjectManager`'s fields don't use it. I followed the file, as my plan says, rather than mixing the two styles in one class.
 
-[Entry]
+**2026-11-19: tests first, then a scope change**
 
-**[Date]**
+- I added `TestHashCollisionKeepsPayloadsApart` and `TestHashCollisionStillSharesIdenticalPayloads`. Both pass `collidingHash`, which returns 42 for every payload.
+- On the refactor-only code, the collision test failed with the repro's numbers: B read `"payload-A"`, with `sizeUnique()` 1 and 9 bytes instead of 2 and 18. The dedup test passed, as it should today.
+- I wrote the fix: a bucket per hash, `hasSameBytes` (`std::equal` over `data()`) in `setObject`, an `ObjectLocation {hash, payload}` per ID, a lookup by pointer in delete and duplicate, and a `uniqueObjectsCount` counter. All 7 tests passed.
+- **Wrong turn:**
+  - I then ran the `duplicateObject(id, id)` check my plan asked for, comparing the old and new code. On `main` it returns null and leaves 0 bytes counted for 1 object. The new code crashed with a segfault.
+  - My first attempt used AddressSanitizer, but every build hung on this Mac, the safe cases too, so I compared plain builds instead.
+  - The server passes a client's DUPLICATE IDs straight through, so a client could crash the server.
+  - I chose to guard it in this PR, rather than shipping a new crash or blocking on a separate PR first.
+- I set the collision work aside with `git stash`, added the guard and `TestDuplicateObjectOntoItself` to the old code, saw the test crash without the guard (exit 139) and pass with it, and committed `f83bd6f`.
+- Restoring the stash conflicted, because both commits added tests at the end of the same file. I rebuilt the file from both sides and pointed the guard at the new `ObjectLocation`.
+- A typo in my shell command dropped the stash before the resolved file was copied in. Nothing was lost, because the resolved file was already saved.
 
-[Entry]
+**2026-11-19: verification and the fix commit**
+
+- All 8 `test_object_manager` tests pass. The guarded `duplicateObject(a, a)` now returns the payload, with the counts unchanged.
+- The repro harness's `#define hash` broke on the new `ObjectLocation::hash` field. I ran the one-line constructor variant instead. Before the fix (`b4998a0`) it printed the Unit 6 failure line for line. After the fix, the forced collision prints `"payload-B"`, 2 objects and 18 bytes, the same as the control.
+- Every ship manifest row passed:
+  - The C++ build and `./scripts/test.sh` (6 of 6).
+  - clang-format.
+  - The Python object storage tests: 10 passed, one more than before, from a test upstream added.
+  - ruff and mypy.
+- I committed the fix as `6df0ae1`. The branch is now refactor, guard, fix, with no agent trailer.
 
 **Toolkit**
 
