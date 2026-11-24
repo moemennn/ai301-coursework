@@ -68,7 +68,7 @@ My manifest lists six of the project's own checks: the C++ build and `./scripts/
 
 **Unit 8: installed the PR monitor, wrote my playbook from opengris-scaler's merge history, and ran it on PR #1106 (2026-11-23)**
 
-I set my first-review nudge at 7 quiet days. The five most recent merged PRs from outside contributors got a maintainer's first response after 0, 0, 1, 4 and 29 days, and CONTRIBUTING.md states no wait. The monitor's `--state` labeled my PR FEEDBACK-IN, but the only comment was the EasyCLA bot's, so I added a rule that bot comments aren't feedback and don't reset the quiet-day count. With that rule, the full run drafted a wait note: no reply, and no nudge before 2026-11-27. I didn't post anything. Checking the draft against the PR, I found that its "1 passing" check is only EasyCLA, because the repo's CI hasn't run on my PR, so my nudge can't say "checks pass" until it does.
+I set my first-review nudge at 7 quiet days, because the five most recent merged PRs from outside contributors got a maintainer's first response after 0, 0, 1, 4 and 29 days, and CONTRIBUTING.md states no wait. The monitor's `--state` labeled my PR FEEDBACK-IN when the only comment was the EasyCLA bot's, so I added a rule that bot comments aren't feedback and don't reset the quiet-day count. With that rule, the full run drafted a wait note (no reply, and no nudge before 2026-11-27), and I posted nothing. Checking the draft against the PR, I found that its "1 passing" check is only EasyCLA, because the repo's CI hasn't run on my PR, so my nudge can't say "checks pass" until it does.
 
 ---
 
