@@ -14,6 +14,16 @@
 
 6. **Keep observations separate from claims.** Record what the reproduction evidence actually demonstrates before evaluating what the candidate plan claims. This prevents a plausible explanation from influencing the interpretation of the evidence.
 
+## Where each source comes from in live mode
+
+The read order above names the sections of an eval bundle. In live mode there is no bundle, so build each section from these sources before step 1:
+
+- **Issue description:** the issue body, via `gh issue view <url>`.
+- **Repro evidence:** the student's own posted repro comment on that issue. If none is posted, use the repro evidence the drafts quote, and say in the result that it came from the drafts, not the thread. If the drafts quote none either, that absence is what the testing and diagnosis checks grade.
+- **Thread highlights:** every comment on the issue, via `gh issue view <url> --comments`, plus any linked PR. Record maintainers' comments separately from other contributors'.
+- **Repo facts:** CONTRIBUTING.md, AGENTS.md or similar agent rules, and the files the plan names, read at the upstream default branch. Note the commit you read them at, so line references can be checked against it.
+- **Candidate plan:** the student's `plan.md` and draft plan comment, exactly as given.
+
 ## Evidence gathering
 
 1. **Diagnosis evidence:** Locate the candidate plan's stated root cause. Compare it against the issue's observed behavior, reproduction steps, control results, and relevant thread discussion. Record supporting evidence, contradictions, and unresolved alternatives.

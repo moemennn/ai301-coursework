@@ -68,7 +68,7 @@ My manifest lists six of the project's own checks: the C++ build and `./scripts/
 
 **Unit 8: installed the PR monitor, wrote my playbook from opengris-scaler's merge history, and ran it on PR #1106 (2026-11-23)**
 
-I set my first-review nudge at 7 quiet days, because the five most recent merged PRs from outside contributors got a maintainer's first response after 0, 0, 1, 4 and 29 days, and CONTRIBUTING.md states no wait. The monitor's `--state` labeled my PR FEEDBACK-IN when the only comment was the EasyCLA bot's, so I added a rule that bot comments aren't feedback and don't reset the quiet-day count. With that rule, the full run drafted a wait note (no reply, and no nudge before 2026-11-27), and I posted nothing. Checking the draft against the PR, I found that its "1 passing" check is only EasyCLA, because the repo's CI hasn't run on my PR, so my nudge can't say "checks pass" until it does.
+I set my first-review nudge at 7 quiet days, because the five most recent merged PRs from outside contributors got a maintainer's first response after 0, 0, 1, 4 and 29 days, and CONTRIBUTING.md states no wait. The monitor's `--state` labeled my PR FEEDBACK-IN when the only comment was the EasyCLA bot's, so I added a rule that bot comments aren't feedback and don't reset the quiet-day count. With that rule, the full run drafted a wait note (no reply, and no nudge before 2026-11-27), and I posted nothing. Checking the draft against the PR, I found that its "1 passing" check is only EasyCLA, because the repo's CI hasn't run on my PR, so I rewrote my nudge rule to report CI as the PR page shows it, not "checks pass".
 
 ---
 
@@ -254,7 +254,7 @@ echo; echo "=== forced collision: same hash, two different payloads ==="; "$OUT/
 
 **Reproduction Evidence**
 
-- **Commit showing reproduction:** none (the harness isn't in my fork)
+- **Commit showing reproduction:** https://github.com/moemennn/ai301-coursework/commit/e7166aac360bb7e4a4404aec3d4cba30775e9e05 adds the three harness files to `beat-2-contribution/repro/`, with `run-output.txt` from a rerun against `e7fd9f0` on 2026-11-23. That output matches the 2026-11-18 log below line for line.
 - **Screenshots/logs:** the output of `run.sh`, from my run on 2026-11-18:
 
 ```text
@@ -297,7 +297,7 @@ RESULT: B's bytes were replaced by A's
 - What changed:
   - I pasted the full `run.sh` and `repro_collision.cpp` into the report, and changed the command to `bash repro/run.sh` so a copied script runs.
   - I restored the posted comment's Markdown in `claim-draft.md`.
-  - Still to do: edit the posted claim with the new timeframe line and correct how it describes gxuu's suggestion.
+  - I decided to leave the posted claim as it is, rather than edit it after the PR was open. The PR description describes gxuu's detect-only suggestion accurately, and What I'd Do Differently records the lesson.
 
 ---
 
@@ -393,7 +393,7 @@ Deviations:
   - I no longer claim the PR can't change `duplicateObject(id, id)`. Instead, I'll check it after the change.
   - I marked the server behavior as read from the code, not run. I added the FINOS CLA check, and a PR line on why I chose buckets over gxuu's detect-only option.
   - In the comment, I replaced a self-contradicting sentence ("unmodified … with `std::hash` replaced") with how the collision was actually forced.
-  - Still to patch in `procedure.md`: say where each evidence section comes from in live mode.
+  - On 2026-11-23, I patched `procedure.md` with a "Where each source comes from in live mode" section. It maps each bundle section to its live source (issue body, my posted repro comment or the drafts' quotes, the thread, CONTRIBUTING.md and AGENTS.md at a noted commit, and my drafts).
 
 ---
 
@@ -593,7 +593,7 @@ It links my claim, and says I built before a reply and will rework it for a 128-
 
 **What I'd Do Differently Next Time**
 
-- **Post nothing without the voice guard.** My claim went up 20 minutes before I installed the guard, and it still promises a PR "within about a week" and misdescribes gxuu's suggestion. I meant to edit it and haven't.
+- **Post nothing without the voice guard.** My claim went up 20 minutes before I installed the guard, and it still promises a PR "within about a week" and misdescribes gxuu's suggestion. Once the PR was open, I chose to leave the claim as posted and let the PR description carry the accurate version.
 - **Get a maintainer's answer before building, or ask a smaller question first.** I built before rafa-be replied to my claim. It worked out because the PR follows rafa-be's own suggestion, but a reply choosing the 128-bit hash would have meant redoing the branch.
 - **Set up the real build on day one.** I reproduced the bug with a hand-rolled clang command and only got CMake working in Unit 7. Building with the project's own scripts first would have caught the Rosetta and linker problems before they could block the gate.
 - **Read what each check actually is.** "1 passing" on my PR is EasyCLA, not CI. Next time I'll look at which workflows ran before treating a green status as proof the code builds on other platforms.
