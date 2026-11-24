@@ -508,7 +508,7 @@ All three are in `tests/cpp/object_storage/test_object_manager.cpp`.
 **2026-11-23: no code changes**
 
 - No maintainer has replied. GitHub shows the branch as behind `main`, but with no conflicts, so I haven't rebased. I'll rebase only if a maintainer asks or a conflict appears.
-- The only check on the PR is EasyCLA. The repo's CI workflows haven't run on the branch yet, so the Linux and Windows builds are still unverified.
+- The only check on the PR is EasyCLA. The repo's three workflows (Build And Test, CodeQL, Dependency Review) show `action_required`: as a first-time contributor, my runs wait for a maintainer to approve them. So the Linux and Windows builds are still unverified.
 
 **Toolkit**
 
@@ -521,7 +521,7 @@ All three are in `tests/cpp/object_storage/test_object_manager.cpp`.
   - **Commit order:** putting the guard before the fix meant stashing the fix. The stash conflicted in the test file, and a typo in my command dropped the stash before the resolved file was copied in. The resolved file was already saved, so nothing was lost.
   - **Style:** AGENTS.md's `_camelCase` field rule disagrees with how `ObjectManager` names its fields today.
 - What changed:
-  - The guard got its own commit before the fix, so no commit on the branch can crash the server. The plan, `plan.md` and Deviations record it, and the PR description will list it.
+  - The guard got its own commit before the fix, so no commit on the branch can crash the server. The plan, `plan.md` and Deviations record it, and the PR description lists it.
   - New fields follow the file's existing names. The style question isn't mine to settle in this PR.
   - I added AddressSanitizer's hang on this Mac to my notes, so I don't lose time on it again.
 
