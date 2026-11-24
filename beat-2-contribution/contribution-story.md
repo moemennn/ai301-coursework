@@ -497,6 +497,19 @@ All three are in `tests/cpp/object_storage/test_object_manager.cpp`.
   - ruff and mypy.
 - I committed the fix as `6df0ae1`. The branch is now refactor, guard, fix, with no agent trailer.
 
+**2026-11-20: through the ship-gate and into a PR**
+
+- The gate's first run failed the build: its `python3` is Anaconda's x86_64 build, so `./scripts/build.sh` ran under Rosetta and chose the x86_64 preset. Manifest rows 1 to 3 now run through `arch -arm64`.
+- pr-precheck counted 24 changed files, because my local `main` was still at `e7fd9f0`. I fast-forwarded it to upstream `main`.
+- pr-precheck caught "Commits, each with its tests" in my description, when the refactor commit has no tests. My voice guard also stopped the draft for asking two questions. The description now asks only about the version bump.
+- After the gate's PASS, I pushed `fix/177-hash-collision` to my fork and opened #1106 against `finos/opengris-scaler` `main`. The code didn't change from `6df0ae1`.
+- The EasyCLA bot flagged that my CLA wasn't signed. I signed the FINOS CLA, and the check passed.
+
+**2026-11-23: no code changes**
+
+- No maintainer has replied. GitHub shows the branch as behind `main`, but with no conflicts, so I haven't rebased. I'll rebase only if a maintainer asks or a conflict appears.
+- The only check on the PR is EasyCLA. The repo's CI workflows haven't run on the branch yet, so the Linux and Windows builds are still unverified.
+
 **Toolkit**
 
 - Tool: Claude Code built the change on my branch, with `plan.md` as the scope to stay inside and my `CLAUDE.local.md` for the repo's rules (Conventional Commits, no agent trailer, a failing test before the fix). It ran the object storage tests and clang-format after each commit, and the full manifest before the fix commit. It asked me before each decision that wasn't in the plan.
@@ -565,25 +578,33 @@ It links my claim, and says I built before a reply and will rework it for a 128-
 
 **Technical Skills Gained**
 
-[What you learned technically, named concretely.]
+- **Hashing versus identity:** a 64-bit hash can't stand in for a payload's identity. A correct dedup needs the same pattern as `std::unordered_set`: hash to find a bucket, then compare bytes. I also learned that `std::hash` has no fixed algorithm. libc++, libstdc++ and MSVC each use their own, so no pair of colliding inputs works on every platform.
+- **Testing a case that never happens naturally:** I passed the hash function into `ObjectManager` through an `explicit` constructor, so a test can force a collision with a function that always returns 42. The default constructor keeps the server unchanged. Before that, I forced a collision without touching the source, by pre-including a header with `-include` and diffing the preprocessed file to show only the hash call changed.
+- **Memory bugs in C++:** `duplicateObject(id, id)` read a map entry after erasing it. On `main` that returned null quietly. With my new per-ID record, it crashed with a segfault. A behavior change can turn a quiet bug into a crash, so I check edge cases on the old and new code side by side.
+- **Building a real C++ project:** CMake presets and `ctest`, generating Cap'n Proto headers, clang-format 21, and how an x86_64 Python under Rosetta picks the wrong build preset on Apple Silicon.
+- **Git for a reviewable branch:** one concern per commit (refactor, guard, fix), resolving a stash conflict by hand, and keeping a fork's `main` in sync with upstream so diffs stay honest.
 
 **Challenges Overcome**
 
-[What was hard and how you solved it; point at the real events, the
-Toolkit blocks above are full of them.]
+- **A Mac that wouldn't build the project:** Xcode's `xcodebuild` was broken, CMake was missing, the Command Line Tools clang couldn't find libc++, and Anaconda's linker and Rosetta got in the way. For the repro, I called clang directly with `-isysroot` and generated the Cap'n Proto header by hand. For the PR, I installed CMake and LLVM 21 and run the build scripts through `arch -arm64`.
+- **The scope change mid-build:** my plan kept the `duplicateObject(id, id)` bug out of the PR, but my fix turned it into a crash that a client could trigger. I put the guard in its own commit before the fix, so no commit on the branch can crash the server, and recorded it as a deviation in the plan and the PR description.
+- **My repro harness breaking on my own fix:** its `#define hash` also renamed my new `ObjectLocation::hash` field. Rather than rename the field to suit the harness, I made a one-line copy that sets the hash through the new constructor, and ran it on `b4998a0` and `6df0ae1` so both sides use the same program.
+- **AddressSanitizer hanging on this Mac:** every ASan build hung, even on safe code, so I compared plain builds and used exit codes (139 for the segfault) as evidence instead.
 
 **What I'd Do Differently Next Time**
 
-[Reflection on your process.]
+- **Post nothing without the voice guard.** My claim went up 20 minutes before I installed the guard, and it still promises a PR "within about a week" and misdescribes gxuu's suggestion. I meant to edit it and haven't.
+- **Get a maintainer's answer before building, or ask a smaller question first.** I built before rafa-be replied to my claim. It worked out because the PR follows rafa-be's own suggestion, but a reply choosing the 128-bit hash would have meant redoing the branch.
+- **Set up the real build on day one.** I reproduced the bug with a hand-rolled clang command and only got CMake working in Unit 7. Building with the project's own scripts first would have caught the Rosetta and linker problems before they could block the gate.
+- **Read what each check actually is.** "1 passing" on my PR is EasyCLA, not CI. Next time I'll look at which workflows ran before treating a green status as proof the code builds on other platforms.
 
 ---
 
 ## Resources Used
 
-[What actually helped, not a reading list. List things this story
-already shows you using: the doc you followed to set the environment
-up, the thread that explained the bug, the person who answered you.
-One real entry beats ten plausible ones.]
-
-- [Link to documentation that helped]
-- [Discussion, issue, or post that helped]
+- **The issue thread, finos/opengris-scaler#177:** https://github.com/finos/opengris-scaler/issues/177. rafa-be's suggestion to keep `std::hash` and add an equality check is the design my PR follows, and rafa-be's benchmark is where my cost numbers come from. gxuu's comments gave me the detect-only option I argued against and the `std::unordered_set` comparison.
+- **CONTRIBUTING.md:** https://github.com/finos/opengris-scaler/blob/main/CONTRIBUTING.md. It told me about the FINOS CLA requirement and the version-bump rule, whose `scaler/about.py` path no longer exists, which is the one question in my PR.
+- **AGENTS.md:** https://github.com/finos/opengris-scaler/blob/main/AGENTS.md. Its ban on agent `Co-authored-by` trailers is why my commits have none, and its `_camelCase` field rule is the style conflict I noted in Implementation Notes.
+- **FINOS contribution compliance requirements:** https://community.finos.org/docs/governance/Software-Projects/contribution-compliance-requirements. I followed this to sign the CLA after the EasyCLA bot flagged my PR.
+- **The repo's own tests, `tests/cpp/object_storage/test_object_manager.cpp`:** I modeled my three new tests on the existing ones, and their single `"Hello"` payload showed me why the bug went untested.
+- **Claude Code, with my course tools:** issue-scout, repro-check, plan-check, the voice guard, the ship-gate with pr-precheck, and the PR monitor. Each one's Toolkit block above says how I used it.
