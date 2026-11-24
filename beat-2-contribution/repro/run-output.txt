@@ -1,0 +1,17 @@
+scaler commit: e7fd9f0  object_manager.cpp unmodified: yes
+
+=== control: real std::hash, two different payloads ===
+setObject(B) returned        "payload-B"
+getObject(A)                 "payload-A"
+getObject(B)                 "payload-B"   (expected "payload-B")
+size()=2 sizeUnique()=2 totalObjectsSize()=18   (expected 2, 2, 18)
+after deleteObject(A): getObject(B) "payload-B"   (expected "payload-B")
+RESULT: B round-trips correctly
+
+=== forced collision: same hash, two different payloads ===
+setObject(B) returned        "payload-A"
+getObject(A)                 "payload-A"
+getObject(B)                 "payload-A"   (expected "payload-B")
+size()=2 sizeUnique()=1 totalObjectsSize()=9   (expected 2, 2, 18)
+after deleteObject(A): getObject(B) "payload-A"   (expected "payload-B")
+RESULT: B's bytes were replaced by A's
