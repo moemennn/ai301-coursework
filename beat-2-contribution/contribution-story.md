@@ -531,6 +531,8 @@ All three are in `tests/cpp/object_storage/test_object_manager.cpp`.
 
 **PR Link:** https://github.com/finos/opengris-scaler/pull/1106
 
+**Claim comment:** https://github.com/finos/opengris-scaler/issues/177#issuecomment-6998745588 (posted 2026-11-18)
+
 **PR Description:** It starts with `Fixes #177`. The description covers:
 
 - **The cause:** `ObjectManager` identified a payload by its 64-bit `std::hash` alone, so a colliding payload shared the first one's storage.
