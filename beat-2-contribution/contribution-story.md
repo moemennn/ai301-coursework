@@ -537,6 +537,7 @@ It links my claim, and says I built before a reply and will rework it for a 128-
 
 - 2026-11-20: no maintainer feedback yet. The `linux-foundation-easycla` bot commented that the CLA is not signed, and the EasyCLA check is failing. CONTRIBUTING.md says nothing merges without a FINOS CLA, so I needed to sign it.
 - 2026-11-20: I signed the CLA. The bot updated its comment to say I'm authorized under a signed CLA, and the EasyCLA check now passes. There's still no maintainer feedback.
+- 2026-11-23: none yet. No maintainer has commented or reviewed in the 3 days since I opened the PR, so I haven't replied to anything.
 
 **Status:** Awaiting review
 
