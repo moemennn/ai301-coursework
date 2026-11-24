@@ -66,10 +66,9 @@ I merged my three voice-guide copies into one guide with an Upstream section for
 
 My manifest lists six of the project's own checks: the C++ build and `./scripts/test.sh`, clang-format, the Python object storage tests, and ruff and mypy. Getting it to run on this Mac meant installing CMake and LLVM 21 and steering around Anaconda's old linker. I also excluded the full Python suite, because on `main` 6 of its tests time out under load and it takes about 19 minutes. On my branch, the gate stopped three times before it said PASS: (1) its `python3` is Anaconda's Intel build, so the build ran under Rosetta and picked the x86_64 preset, and I now run those scripts through `arch -arm64`; (2) pr-precheck saw 24 changed files, because the gate diffs against my local `main`, which was one upstream commit behind, so I fast-forwarded it; (3) pr-precheck caught a false line in my description, "Commits, each with its tests", when my refactor commit has none, and I fixed the line. None of these needed a rubric change. Each stop was right about my setup or my words.
 
-**Unit 8: [one line on the tool work]**
+**Unit 8: installed the PR monitor, wrote my playbook from opengris-scaler's merge history, and ran it on PR #1106 (2026-11-23)**
 
-[2-4 sentences: the PR-monitor and your playbook. What it read, what it
-drafted, what you did with the draft.]
+I set my first-review nudge at 7 quiet days. The five most recent merged PRs from outside contributors got a maintainer's first response after 0, 0, 1, 4 and 29 days, and CONTRIBUTING.md states no wait. The monitor's `--state` labeled my PR FEEDBACK-IN, but the only comment was the EasyCLA bot's, so I added a rule that bot comments aren't feedback and don't reset the quiet-day count. With that rule, the full run drafted a wait note: no reply, and no nudge before 2026-11-27. I didn't post anything. Checking the draft against the PR, I found that its "1 passing" check is only EasyCLA, because the repo's CI hasn't run on my PR, so my nudge can't say "checks pass" until it does.
 
 ---
 
